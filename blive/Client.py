@@ -50,7 +50,7 @@ class Client(WebSocketApp):
                          on_message=self.__message_handler, on_open=self.__login, on_close=self.stop)
         self.logger = logger
         self.heartbeat_stop = True
-        self.last_heartbeat_timestamp = int(time.time())
+        self.last_heartbeat_timestamp = -1
         self.message_callback = message_callback
         self.logger.info("Initiated")
         self.login_complete = False
@@ -105,24 +105,27 @@ class Client(WebSocketApp):
             if protocol_version == WS_BODY_PROTOCOL_VERSION_DEFLATE:
                 self.logger.debug("Decompressing packet")
                 body = zlib.decompress(body)
-                return self.__message_handler(ws, body)
-            try:
-                body = json.loads(body)
-            except json.decoder.JSONDecodeError:
-                pass
-            if operation == WS_OP_CONNECT_SUCCESS and body["code"] == 0:
-                self.logger.info("Websocket connection successful")
-                self.login_complete = True
-            elif operation == WS_OP_HEARTBEAT_REPLY:
-                # not sure how to parse body yet
-                self.logger.info("Received heartbeat reply packet")
-            elif operation == WS_OP_MESSAGE:
-                self.logger.info("Received message: %s" % (body))
+                self.__message_handler(ws, body)
             else:
-                raise RuntimeError(
-                    "Unknown operation received", operation, body)
-            if self.message_callback is not None:
-                self.message_callback(self, operation, sequence_id, body)
+                try:
+                    body = json.loads(body)
+                except json.decoder.JSONDecodeError:
+                    pass
+                if operation == WS_OP_CONNECT_SUCCESS and body["code"] == 0:
+                    self.logger.info("Websocket connection successful")
+                    self.login_complete = True
+                elif operation == WS_OP_HEARTBEAT_REPLY:
+                    body = int.from_bytes(body, byteorder="big", signed=False)
+                    self.logger.info(
+                        "Received heartbeat reply packet, online count is %s" % (body))
+                elif operation == WS_OP_MESSAGE:
+                    self.logger.info("Received message: %s" % (body))
+                else:
+                    raise RuntimeError(
+                        "Unknown operation received", operation, body)
+                if self.message_callback is not None:
+                    Thread(target=self.message_callback, args=(
+                        self, operation, sequence_id, body,)).start()
             if len(packet) > packet_length:
                 self.logger.debug("Extra packet detected")
                 self.__message_handler(ws, packet[packet_length:])
