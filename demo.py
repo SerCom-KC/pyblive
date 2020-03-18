@@ -10,7 +10,9 @@ ROOM_ID = 37702
 
 
 def message_handler(client, operation, sequence_id, body):
-    if operation == WS_OP_MESSAGE and body["cmd"] == "DANMU_MSG":
+    if operation == WS_OP_CONNECT_SUCCESS and body["code"] == 0:
+        print("Successfully connected to room %s" % (client.room_id))
+    elif operation == WS_OP_MESSAGE and body["cmd"] == "DANMU_MSG":
         print("New danmaku from %s [%s]: %s" % (
             body["info"][2][1], body["info"][2][0], body["info"][1]))
 

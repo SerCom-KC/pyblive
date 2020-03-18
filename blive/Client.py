@@ -1,11 +1,11 @@
-from websocket import WebSocketApp, ABNF
 import json
 import logging
 import struct
 import time
 import zlib
-from collections import namedtuple
 from threading import Thread
+
+from websocket import ABNF, WebSocketApp
 
 WS_OP_HEARTBEAT = 2
 WS_OP_HEARTBEAT_REPLY = 3
@@ -97,11 +97,12 @@ class Client(WebSocketApp):
     def __message_handler(self, ws, packet):
         try:
             self.logger.debug("Received packet length: %s" % (len(packet)))
-            header = self.header_struct.unpack_from(packet)
+            packet_length, header_length, protocol_version, operation, sequence_id = self.header_struct.unpack_from(
+                packet)
             self.logger.debug(
-                "Headers: packet_length=%s, header_length=%s, protocol_version=%s, operation=%s, sequence_id=%s" % header)
-            body = packet[header[1]:header[0]]
-            if header[2] == WS_BODY_PROTOCOL_VERSION_DEFLATE:
+                "Headers: packet_length=%s, header_length=%s, protocol_version=%s, operation=%s, sequence_id=%s" % (packet_length, header_length, protocol_version, operation, sequence_id))
+            body = packet[header_length:packet_length]
+            if protocol_version == WS_BODY_PROTOCOL_VERSION_DEFLATE:
                 self.logger.debug("Decompressing packet")
                 body = zlib.decompress(body)
                 return self.__message_handler(ws, body)
@@ -109,22 +110,22 @@ class Client(WebSocketApp):
                 body = json.loads(body)
             except json.decoder.JSONDecodeError:
                 pass
-            if header[3] == WS_OP_CONNECT_SUCCESS and body["code"] == 0:
+            if operation == WS_OP_CONNECT_SUCCESS and body["code"] == 0:
                 self.logger.info("Websocket connection successful")
                 self.login_complete = True
-            elif header[3] == WS_OP_HEARTBEAT_REPLY:
+            elif operation == WS_OP_HEARTBEAT_REPLY:
                 # not sure how to parse body yet
                 self.logger.info("Received heartbeat reply packet")
-            elif header[3] == WS_OP_MESSAGE:
+            elif operation == WS_OP_MESSAGE:
                 self.logger.info("Received message: %s" % (body))
             else:
                 raise RuntimeError(
-                    "Unknown operation received", header[3], body)
+                    "Unknown operation received", operation, body)
             if self.message_callback is not None:
-                self.message_callback(self, header[3], header[4], body)
-            if len(packet) > header[0]:
+                self.message_callback(self, operation, sequence_id, body)
+            if len(packet) > packet_length:
                 self.logger.debug("Extra packet detected")
-                self.__message_handler(ws, packet[header[0]:])
+                self.__message_handler(ws, packet[packet_length:])
         except Exception as e:
             self.logger.error("Failed to parse packet: %s" % (e))
 
